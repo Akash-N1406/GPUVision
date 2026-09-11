@@ -1,0 +1,23 @@
+# Phase 8 (optional Django layer). The CUDA benchmarking core (Phases 2-7) is
+# meant to be run natively for full GPU access and profiling with
+# Nsight — same scoping decision as the fraud-detection project's
+# compose file (native Hadoop/Kafka/Spark, containerized Postgres+Django only).
+
+version: "3.9"
+
+services:
+  web:
+    build: .
+    command: python3 backend/django_app/manage.py runserver 0.0.0.0:8002
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

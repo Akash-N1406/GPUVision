@@ -1,0 +1,11 @@
+numpy>=1.26
+opencv-python>=4.9
+matplotlib>=3.8
+pandas>=2.2
+
+# Optional web layer (Phase 8)
+Django>=5.0
+djangorestframework>=3.15
+
+# Optional: only needed if you want GPU info / cross-checks from Python side
+# pycuda>=2024.1

@@ -1,0 +1,17 @@
+build/
+*.o
+*.obj
+*.exe
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep
+reports/*.csv
+*.pyd
+.DS_Store
+*.egg-info/
+django_app/db.sqlite3
