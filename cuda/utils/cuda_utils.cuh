@@ -32,6 +32,19 @@
 
 namespace gcv {
 
+// Shared device-side helpers used by convolution-style kernels (naive,
+// tiled, Sobel, blur) so boundary/clamping logic is defined exactly once
+// instead of copy-pasted into every kernel file.
+__device__ inline int clamp_coord(int v, int lo, int hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+__device__ inline uint8_t clamp_to_byte(float v) {
+    if (v < 0.0f) return 0;
+    if (v > 255.0f) return 255;
+    return static_cast<uint8_t>(v + 0.5f);
+}
+
 // Event-based GPU timer. More accurate than wall-clock host timers for
 // measuring kernel execution time, since it's timed on the GPU's own clock
 // and isn't polluted by host-side scheduling jitter.
