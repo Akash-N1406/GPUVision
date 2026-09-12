@@ -78,8 +78,3 @@ gpu-computer-vision/
 ├── data/{input,output}   sample images, processed results
 └── reports/              benchmark_results.csv, analysis
 ```
-
-## Resume Note
-
-Don't put a specific speedup number (e.g. "10x") on a resume/portfolio until
-it's measured on your actual hardware in Phase 6.
