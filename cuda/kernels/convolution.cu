@@ -92,4 +92,92 @@ Image convolution_cuda_naive(const Image& img, const std::vector<float>& kernel,
     return out;
 }
 
+DetailedTimingSamples convolution_cuda_naive_detailed(const Image& img,
+                                                       const std::vector<float>& kernel,
+                                                       int kernel_size,
+                                                       int warmup, int measured) {
+    if (kernel_size % 2 == 0) {
+        throw std::runtime_error("convolution_cuda_naive_detailed: kernel_size must be odd");
+    }
+    if (static_cast<int>(kernel.size()) != kernel_size * kernel_size) {
+        throw std::runtime_error("convolution_cuda_naive_detailed: kernel size mismatch");
+    }
+
+    const size_t img_bytes = img.size_bytes();
+    const size_t kernel_bytes = kernel.size() * sizeof(float);
+
+    // Allocated ONCE, reused across every warmup and measured iteration —
+    // this is the key difference from convolution_cuda_naive, which
+    // allocates fresh buffers on every single call.
+    uint8_t* d_in = nullptr;
+    uint8_t* d_out = nullptr;
+    float* d_kernel = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_in, img_bytes));
+    CUDA_CHECK(cudaMalloc(&d_out, img_bytes));
+    CUDA_CHECK(cudaMalloc(&d_kernel, kernel_bytes));
+    // Kernel weights don't change between iterations, so upload once,
+    // outside the timed loop entirely.
+    CUDA_CHECK(cudaMemcpy(d_kernel, kernel.data(), kernel_bytes, cudaMemcpyHostToDevice));
+
+    std::vector<uint8_t> host_out(img_bytes);
+
+    cudaEvent_t ev_start, ev_h2d, ev_kernel, ev_d2h;
+    CUDA_CHECK(cudaEventCreate(&ev_start));
+    CUDA_CHECK(cudaEventCreate(&ev_h2d));
+    CUDA_CHECK(cudaEventCreate(&ev_kernel));
+    CUDA_CHECK(cudaEventCreate(&ev_d2h));
+
+    const dim3 block(BLOCK_DIM, BLOCK_DIM);
+    const dim3 grid((img.width + BLOCK_DIM - 1) / BLOCK_DIM,
+                     (img.height + BLOCK_DIM - 1) / BLOCK_DIM);
+
+    // All four events sit on the default stream, same as the memcpy/kernel
+    // calls, so they execute in strict issue order — a single
+    // cudaEventSynchronize on the last event is enough to know the whole
+    // chain has completed, and cudaEventElapsedTime between consecutive
+    // pairs gives an accurate GPU-clock-timed breakdown of each phase.
+    auto run_once = [&]() {
+        CUDA_CHECK(cudaEventRecord(ev_start));
+        CUDA_CHECK(cudaMemcpy(d_in, img.data.get(), img_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaEventRecord(ev_h2d));
+        convolution_kernel_naive<<<grid, block>>>(d_in, d_out, img.width, img.height,
+                                                   img.channels, d_kernel, kernel_size);
+        CUDA_CHECK_KERNEL_LAUNCH();
+        CUDA_CHECK(cudaEventRecord(ev_kernel));
+        CUDA_CHECK(cudaMemcpy(host_out.data(), d_out, img_bytes, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaEventRecord(ev_d2h));
+        CUDA_CHECK(cudaEventSynchronize(ev_d2h));
+    };
+
+    for (int i = 0; i < warmup; ++i) {
+        run_once();
+    }
+
+    DetailedTimingSamples result;
+    result.h2d_ms.reserve(measured);
+    result.kernel_ms.reserve(measured);
+    result.d2h_ms.reserve(measured);
+
+    for (int i = 0; i < measured; ++i) {
+        run_once();
+        float h2d = 0.0f, kern = 0.0f, d2h = 0.0f;
+        CUDA_CHECK(cudaEventElapsedTime(&h2d, ev_start, ev_h2d));
+        CUDA_CHECK(cudaEventElapsedTime(&kern, ev_h2d, ev_kernel));
+        CUDA_CHECK(cudaEventElapsedTime(&d2h, ev_kernel, ev_d2h));
+        result.h2d_ms.push_back(h2d);
+        result.kernel_ms.push_back(kern);
+        result.d2h_ms.push_back(d2h);
+    }
+
+    CUDA_CHECK(cudaEventDestroy(ev_start));
+    CUDA_CHECK(cudaEventDestroy(ev_h2d));
+    CUDA_CHECK(cudaEventDestroy(ev_kernel));
+    CUDA_CHECK(cudaEventDestroy(ev_d2h));
+    CUDA_CHECK(cudaFree(d_in));
+    CUDA_CHECK(cudaFree(d_out));
+    CUDA_CHECK(cudaFree(d_kernel));
+
+    return result;
+}
+
 } // namespace gcv

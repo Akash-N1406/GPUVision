@@ -12,6 +12,7 @@
 #pragma once
 
 #include "../../cpp/common/image_io.hpp"
+#include "../utils/cuda_utils.cuh"
 #include <vector>
 
 namespace gcv {
@@ -21,5 +22,17 @@ namespace gcv {
 // (should match exactly) and the timings (should show shared-memory's win).
 Image convolution_cuda_tiled(const Image& img, const std::vector<float>& kernel,
                               int kernel_size);
+
+// Instrumented version for Phase 6 benchmarking, same buffer-reuse +
+// CUDA-event pattern as convolution_cuda_naive_detailed. Note this kernel
+// launches once PER CHANNEL internally (see convolution_tiled_channel_kernel
+// in the .cu file) — the "kernel_ms" phase here sums all of those launches
+// since they're issued back-to-back on the same stream, which is exactly
+// what's needed to check whether the per-channel launch overhead is
+// costing more than shared-memory tiling saves.
+DetailedTimingSamples convolution_cuda_tiled_detailed(const Image& img,
+                                                       const std::vector<float>& kernel,
+                                                       int kernel_size,
+                                                       int warmup = 5, int measured = 20);
 
 } // namespace gcv

@@ -25,6 +25,29 @@ namespace gcv
         double stddev_ms = 0.0;
     };
 
+    // Computes mean/min/max/stddev from a set of timing samples (in ms).
+    // Factored out so callers that gather samples a different way (e.g. CUDA
+    // event-based per-phase timing, rather than run_timed's host-clock wrapper)
+    // can still get consistent statistics.
+    inline TimingStats compute_stats(const std::vector<double> &samples)
+    {
+        TimingStats stats;
+        stats.min_ms = *std::min_element(samples.begin(), samples.end());
+        stats.max_ms = *std::max_element(samples.begin(), samples.end());
+
+        double sum = 0.0;
+        for (double s : samples)
+            sum += s;
+        stats.mean_ms = sum / samples.size();
+
+        double sq_sum = 0.0;
+        for (double s : samples)
+            sq_sum += (s - stats.mean_ms) * (s - stats.mean_ms);
+        stats.stddev_ms = std::sqrt(sq_sum / samples.size());
+
+        return stats;
+    }
+
     // Runs `fn` `warmup` times (results discarded — this absorbs CUDA context
     // initialization, cache warm-up, etc. so measured runs reflect steady-state
     // performance), then `measured` times with a host high-resolution clock
@@ -48,21 +71,7 @@ namespace gcv
             samples.push_back(std::chrono::duration<double, std::milli>(end - start).count());
         }
 
-        TimingStats stats;
-        stats.min_ms = *std::min_element(samples.begin(), samples.end());
-        stats.max_ms = *std::max_element(samples.begin(), samples.end());
-
-        double sum = 0.0;
-        for (double s : samples)
-            sum += s;
-        stats.mean_ms = sum / samples.size();
-
-        double sq_sum = 0.0;
-        for (double s : samples)
-            sq_sum += (s - stats.mean_ms) * (s - stats.mean_ms);
-        stats.stddev_ms = std::sqrt(sq_sum / samples.size());
-
-        return stats;
+        return compute_stats(samples);
     }
 
     // Minimal append-only CSV writer. Caller writes the header once, then one

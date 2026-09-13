@@ -10,6 +10,7 @@
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 // Wrap every CUDA runtime API call in this. Aborts with a clear message
 // (file, line, and the CUDA error string) instead of silently continuing
@@ -31,6 +32,17 @@
     CUDA_CHECK(cudaGetLastError())
 
 namespace gcv {
+
+// Raw per-iteration timing samples from an instrumented CUDA benchmark run
+// (see convolution_cuda_naive_detailed / convolution_cuda_tiled_detailed).
+// Kept as raw samples rather than pre-aggregated stats so the caller (the
+// benchmark harness) decides how to summarize them — this file doesn't
+// need to know about TimingStats/compute_stats in cpp/benchmark.
+struct DetailedTimingSamples {
+    std::vector<double> h2d_ms;
+    std::vector<double> kernel_ms;
+    std::vector<double> d2h_ms;
+};
 
 // Shared device-side helpers used by convolution-style kernels (naive,
 // tiled, Sobel, blur) so boundary/clamping logic is defined exactly once
