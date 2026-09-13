@@ -65,4 +65,23 @@ namespace gcv
         }
     }
 
+    Image resize_image(const Image &img, int new_width, int new_height)
+    {
+        if (img.channels != 1 && img.channels != 3)
+        {
+            throw std::runtime_error("resize_image: unsupported channel count " +
+                                     std::to_string(img.channels));
+        }
+
+        const int cv_type = (img.channels == 3) ? CV_8UC3 : CV_8UC1;
+        cv::Mat src(img.height, img.width, cv_type, const_cast<uint8_t *>(img.data.get()));
+
+        cv::Mat resized;
+        cv::resize(src, resized, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
+
+        Image out = make_image(new_width, new_height, img.channels);
+        std::memcpy(out.data.get(), resized.data, out.size_bytes());
+        return out;
+    }
+
 } // namespace gcv

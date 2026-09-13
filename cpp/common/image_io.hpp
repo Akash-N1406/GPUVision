@@ -43,4 +43,10 @@ namespace gcv
     // Allocates an uninitialized Image with the given dimensions/channels.
     Image make_image(int width, int height, int channels);
 
+    // Resizes `img` to (new_width, new_height) using bilinear interpolation.
+    // Used by the Phase 6 benchmark harness (FR-13) to test the same source
+    // image content at multiple resolutions (640x480 through 4K) rather than
+    // needing separate source files per size.
+    Image resize_image(const Image &img, int new_width, int new_height);
+
 } // namespace gcv
