@@ -164,6 +164,3 @@ with GEMM tiling's well-established advantage, unlike the 3×3 convolution case.
 > custom CUDA-event instrumentation, isolating the root cause to a per-channel kernel
 > launch pattern and reducing the naive/tiled performance gap by roughly 40% at the
 > largest tested resolution.
-
-(Numbers above are from the specific test image and hardware in this report — verify
-against your own benchmark run before quoting elsewhere.)
