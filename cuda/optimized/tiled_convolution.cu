@@ -14,16 +14,23 @@ namespace {
 // neighboring pixels needed by threads at the tile's edges).
 constexpr int TILE_DIM = 16;
 
-// One channel at a time (host loops over channels) — this keeps shared
-// memory usage small and simple (a single uint8_t per pixel in the tile,
-// not one per channel), at the cost of one kernel launch per channel
-// instead of one launch total. For a 3-channel image that's 3 launches
-// instead of 1; at typical image sizes the extra launch overhead is
-// negligible next to the memory-traffic savings shared memory buys us.
-__global__ void convolution_tiled_channel_kernel(const uint8_t* in, uint8_t* out,
-                                                   int width, int height, int channels,
-                                                   int channel_idx, const float* kernel,
-                                                   int kernel_size, int radius) {
+// Loads ALL channels into shared memory in a single pass and computes all
+// channels' outputs in a single kernel launch — unlike an earlier version
+// of this file, which launched once per channel. That per-channel design
+// measured (via cuda/demo_convolution_detailed.cu) as 1.4x-1.9x SLOWER
+// than the naive global-memory kernel, and the gap grew with resolution:
+// each channel was a full independent sweep over the image with zero
+// cache reuse between channels, effectively running 3 full passes instead
+// of 1, plus 3x the launch/__syncthreads() overhead. This version loads
+// the interleaved tile (all channels together, matching the image's actual
+// memory layout) once, syncs once, and every thread loops over channels
+// while reading from shared memory — same channel-loop structure as the
+// naive kernel, just with shared-memory reuse now applied once instead of
+// redundantly 3 times.
+__global__ void convolution_tiled_kernel(const uint8_t* in, uint8_t* out,
+                                          int width, int height, int channels,
+                                          const float* kernel, int kernel_size,
+                                          int radius) {
     extern __shared__ uint8_t tile[];
     const int tile_dim = TILE_DIM + 2 * radius;
 
@@ -32,33 +39,37 @@ __global__ void convolution_tiled_channel_kernel(const uint8_t* in, uint8_t* out
     const int out_x = blockIdx.x * TILE_DIM + tx;
     const int out_y = blockIdx.y * TILE_DIM + ty;
 
-    // Cooperative load: the tile is bigger than the block (TILE_DIM x
-    // TILE_DIM threads, but tile_dim x tile_dim elements needed), so each
-    // thread may load more than one element, strided by the block size.
+    // Cooperative load: tile is bigger than the block, so each thread may
+    // load more than one tile position, strided by the block size. Every
+    // position loads all `channels` bytes together (interleaved, matching
+    // global memory's layout) instead of one channel at a time.
     for (int ly = ty; ly < tile_dim; ly += TILE_DIM) {
         int gy = blockIdx.y * TILE_DIM + ly - radius;
         gy = clamp_coord(gy, 0, height - 1);
         for (int lx = tx; lx < tile_dim; lx += TILE_DIM) {
             int gx = blockIdx.x * TILE_DIM + lx - radius;
             gx = clamp_coord(gx, 0, width - 1);
-            tile[ly * tile_dim + lx] = in[(gy * width + gx) * channels + channel_idx];
+            for (int c = 0; c < channels; ++c) {
+                tile[(ly * tile_dim + lx) * channels + c] = in[(gy * width + gx) * channels + c];
+            }
         }
     }
 
-    // Every thread in the block must finish loading before any thread
-    // starts reading — otherwise a fast thread could read a shared-memory
-    // slot a slower thread hasn't written yet.
+    // ONE sync for the whole block, covering all channels — not one sync
+    // per channel like the previous per-channel-launch design.
     __syncthreads();
 
     if (out_x < width && out_y < height) {
-        float sum = 0.0f;
-        for (int ky = 0; ky < kernel_size; ++ky) {
-            for (int kx = 0; kx < kernel_size; ++kx) {
-                const float weight = kernel[ky * kernel_size + kx];
-                sum += weight * tile[(ty + ky) * tile_dim + (tx + kx)];
+        for (int c = 0; c < channels; ++c) {
+            float sum = 0.0f;
+            for (int ky = 0; ky < kernel_size; ++ky) {
+                for (int kx = 0; kx < kernel_size; ++kx) {
+                    const float weight = kernel[ky * kernel_size + kx];
+                    sum += weight * tile[((ty + ky) * tile_dim + (tx + kx)) * channels + c];
+                }
             }
+            out[(out_y * width + out_x) * channels + c] = clamp_to_byte(sum);
         }
-        out[(out_y * width + out_x) * channels + channel_idx] = clamp_to_byte(sum);
     }
 }
 
@@ -92,14 +103,12 @@ Image convolution_cuda_tiled(const Image& img, const std::vector<float>& kernel,
                      (img.height + TILE_DIM - 1) / TILE_DIM);
 
     const int tile_dim = TILE_DIM + 2 * radius;
-    const size_t shared_bytes = static_cast<size_t>(tile_dim) * tile_dim * sizeof(uint8_t);
+    const size_t shared_bytes =
+        static_cast<size_t>(tile_dim) * tile_dim * img.channels * sizeof(uint8_t);
 
-    for (int c = 0; c < img.channels; ++c) {
-        convolution_tiled_channel_kernel<<<grid, block, shared_bytes>>>(
-            d_in, d_out, img.width, img.height, img.channels, c, d_kernel,
-            kernel_size, radius);
-        CUDA_CHECK_KERNEL_LAUNCH();
-    }
+    convolution_tiled_kernel<<<grid, block, shared_bytes>>>(
+        d_in, d_out, img.width, img.height, img.channels, d_kernel, kernel_size, radius);
+    CUDA_CHECK_KERNEL_LAUNCH();
     CUDA_CHECK(cudaDeviceSynchronize());
 
     Image out = make_image(img.width, img.height, img.channels);
@@ -147,23 +156,18 @@ DetailedTimingSamples convolution_cuda_tiled_detailed(const Image& img,
     const dim3 grid((img.width + TILE_DIM - 1) / TILE_DIM,
                      (img.height + TILE_DIM - 1) / TILE_DIM);
     const int tile_dim = TILE_DIM + 2 * radius;
-    const size_t shared_bytes = static_cast<size_t>(tile_dim) * tile_dim * sizeof(uint8_t);
+    const size_t shared_bytes =
+        static_cast<size_t>(tile_dim) * tile_dim * img.channels * sizeof(uint8_t);
 
-    // "kernel" phase spans ALL per-channel launches (3 for RGB) — they're
-    // issued back-to-back on the default stream, so the elapsed time
-    // between ev_h2d and ev_kernel naturally sums all of them, including
-    // any inter-launch dispatch gaps. This is exactly the number needed to
-    // test whether 3 launches' overhead outweighs shared memory's savings.
+    // Single kernel launch now, not a per-channel loop — "kernel" phase
+    // measures exactly one convolution_tiled_kernel invocation.
     auto run_once = [&]() {
         CUDA_CHECK(cudaEventRecord(ev_start));
         CUDA_CHECK(cudaMemcpy(d_in, img.data.get(), img_bytes, cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaEventRecord(ev_h2d));
-        for (int c = 0; c < img.channels; ++c) {
-            convolution_tiled_channel_kernel<<<grid, block, shared_bytes>>>(
-                d_in, d_out, img.width, img.height, img.channels, c, d_kernel,
-                kernel_size, radius);
-            CUDA_CHECK_KERNEL_LAUNCH();
-        }
+        convolution_tiled_kernel<<<grid, block, shared_bytes>>>(
+            d_in, d_out, img.width, img.height, img.channels, d_kernel, kernel_size, radius);
+        CUDA_CHECK_KERNEL_LAUNCH();
         CUDA_CHECK(cudaEventRecord(ev_kernel));
         CUDA_CHECK(cudaMemcpy(host_out.data(), d_out, img_bytes, cudaMemcpyDeviceToHost));
         CUDA_CHECK(cudaEventRecord(ev_d2h));
