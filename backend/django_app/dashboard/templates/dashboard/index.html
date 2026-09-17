@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GPU Computer Vision Engine</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #222;
+            background: #fafafa;
+        }
+        h1 { font-size: 1.4rem; }
+        form {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .field { margin-bottom: 1rem; }
+        label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+        .help { font-size: 0.85rem; color: #666; }
+        .conditional { display: none; }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 0.6rem 1.4rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        button:hover { background: #1d4ed8; }
+        .errorlist { color: #b91c1c; font-size: 0.9rem; }
+        .results { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+        .result-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1rem;
+            flex: 1;
+            min-width: 260px;
+        }
+        .result-card img { max-width: 100%; border-radius: 4px; }
+        .result-card.error { border-color: #b91c1c; background: #fef2f2; }
+        .time { font-size: 1.3rem; font-weight: 700; color: #2563eb; }
+        .speedup {
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>GPU-Accelerated Computer Vision Engine</h1>
+    <p class="help">
+        Upload an image, pick an operation, and compare CPU vs CUDA execution.
+        This is a thin demo UI over the project's C++/CUDA engine — the real
+        substance is in the benchmark suite and performance report, not here.
+    </p>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <div class="field">
+            <label for="{{ form.image.id_for_label }}">Image</label>
+            {{ form.image }}
+            <div class="help">{{ form.image.help_text }}</div>
+            {{ form.image.errors }}
+        </div>
+
+        <div class="field">
+            <label for="{{ form.algorithm.id_for_label }}">Operation</label>
+            {{ form.algorithm }}
+        </div>
+
+        <div class="field">
+            <label>Execution</label>
+            {{ form.execution }}
+        </div>
+
+        <div class="field conditional" id="blur-fields">
+            <label for="{{ form.kernel_size.id_for_label }}">Kernel size (odd)</label>
+            {{ form.kernel_size }}
+            {{ form.kernel_size.errors }}
+            <label for="{{ form.sigma.id_for_label }}" style="margin-top: 0.5rem;">Sigma</label>
+            {{ form.sigma }}
+        </div>
+
+        <div class="field conditional" id="convolution-fields">
+            <label for="{{ form.preset.id_for_label }}">Kernel preset</label>
+            {{ form.preset }}
+        </div>
+
+        <button type="submit">Process</button>
+    </form>
+
+    {% if results %}
+        {% if speedup %}
+            <div class="speedup">
+                <strong>Speedup:</strong> {{ speedup|floatformat:2 }}x
+                {% if speedup < 1 %}
+                    (GPU was slower than CPU here — expected for small/cheap
+                    operations where transfer and launch overhead dominate;
+                    see the performance report for the full resolution story)
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <div class="results">
+            <div class="result-card">
+                <label>Original</label>
+                <img src="{{ original_url }}" alt="Original image">
+            </div>
+
+            {% for result in results %}
+                <div class="result-card {% if not result.success %}error{% endif %}">
+                    <label>{{ result.device|upper }}</label>
+                    {% if result.success %}
+                        <img src="{{ result.output_url }}" alt="{{ result.device }} result">
+                        <p class="time">{{ result.time_ms|floatformat:3 }} ms</p>
+                    {% else %}
+                        <p><strong>Failed:</strong> {{ result.error }}</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <script>
+        // Shows/hides the algorithm-specific fields based on the selected
+        // operation, so the form doesn't present irrelevant options (a
+        // kernel size field makes no sense for grayscale, for instance).
+        const algorithmSelect = document.getElementById("{{ form.algorithm.id_for_label }}");
+        const blurFields = document.getElementById("blur-fields");
+        const convolutionFields = document.getElementById("convolution-fields");
+
+        function updateConditionalFields() {
+            const value = algorithmSelect.value;
+            blurFields.style.display = (value === "gaussian_blur") ? "block" : "none";
+            convolutionFields.style.display =
+                (value === "convolution_naive" || value === "convolution_tiled") ? "block" : "none";
+        }
+
+        algorithmSelect.addEventListener("change", updateConditionalFields);
+        updateConditionalFields();
+    </script>
+</body>
+</html>
