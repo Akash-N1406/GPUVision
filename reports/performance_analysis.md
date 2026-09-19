@@ -59,7 +59,8 @@ No correctness regressions anywhere in the project.
 
 ## 3. CPU vs GPU: does it help, and when?
 
-See `reports/charts/speedup_vs_resolution.png` and `execution_time_vs_resolution.png`.
+![CPU vs GPU execution time by resolution](charts/execution_time_vs_resolution.png)
+![GPU speedup vs resolution](charts/speedup_vs_resolution.png)
 
 **SRS Question 1 — Does GPU acceleration improve performance?** Yes, decisively for
 compute-heavy operations: Gaussian blur (12.9x-29.5x across resolutions), Sobel
@@ -124,9 +125,18 @@ cares about — not "I wrote a CUDA kernel," but "I profiled, found a real perfo
 bug, diagnosed the root cause, fixed it, and can explain exactly why the fix worked
 and where its limits are."
 
+![Convolution naive vs tiled GPU time](charts/convolution_naive_vs_tiled.png)
+*Note: this chart is drawn from the general resolution sweep, which has known
+timing noise (§1) — the numbers in the narrative above (from the dedicated
+instrumented comparison) are the ones to trust, not this chart's exact values.
+The visible spike at 1280x720 is that noise, not a real effect.*
+
 ---
 
 ## 5. Matrix multiplication: the best number in the project
+
+![Matrix multiply naive vs tiled GPU time](charts/matmul_naive_vs_tiled.png)
+![Matrix multiply speedup vs size](charts/matmul_speedup_vs_size.png)
 
 Naive CUDA matmul hit **247x speedup** over CPU at N=1024 (5.7s CPU vs 23ms GPU) — by
 far the largest speedup measured. This makes sense: matrix multiply is O(N³) compute

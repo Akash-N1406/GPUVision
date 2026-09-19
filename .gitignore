@@ -10,8 +10,11 @@ data/input/*
 !data/input/.gitkeep
 data/output/*
 !data/output/.gitkeep
-reports/*.csv
 *.pyd
 .DS_Store
 *.egg-info/
 django_app/db.sqlite3
+backend/django_app/media/uploads/*
+!backend/django_app/media/uploads/.gitkeep
+backend/django_app/media/outputs/*
+!backend/django_app/media/outputs/.gitkeep
