@@ -164,3 +164,37 @@ with GEMM tiling's well-established advantage, unlike the 3×3 convolution case.
 > custom CUDA-event instrumentation, isolating the root cause to a per-channel kernel
 > launch pattern and reducing the naive/tiled performance gap by roughly 40% at the
 > largest tested resolution.
+
+(Numbers above are from the specific test image and hardware in this report — verify
+against your own benchmark run before quoting elsewhere.)
+
+---
+
+## 8. Phase 9 — profiling attempt and its outcome
+
+An `ncu` (Nsight Compute) run was attempted against `convolution_kernel_naive`
+and `convolution_tiled_kernel` specifically, to get hard cache-hit-rate and
+occupancy numbers for the §4 hypothesis (that a 3×3 kernel doesn't reuse
+enough data for shared-memory tiling to pay off, because L2 cache already
+captures most of the overlap). It hit `ERR_NVGPUCTRPERM` — GPU performance
+counter access denied — on this WSL2 setup, and `sudo` did not resolve it,
+consistent with WSL2 proxying GPU access through the Windows host driver
+rather than a native Linux kernel module.
+
+This surfaced a second, genuinely useful finding of its own: even with the
+counter read failing, `ncu`'s attach/interception mechanism still added a
+real, roughly-fixed timing overhead to whichever kernel it targeted via
+`--kernel-name` — producing wildly different (and mutually inconsistent)
+naive-vs-tiled ratios across repeated attempts (ranging from 0.14x to 5.4x
+at 640x480 alone, none of them real). **None of those numbers are usable
+evidence for or against the §4 hypothesis.** The clean, unprofiled
+`demo_convolution_detailed` numbers already in §4 remain the trustworthy
+source.
+
+The §4 hypothesis (small-kernel-radius reuse being largely redundant with
+automatic L2 caching) is therefore still a hypothesis, not a confirmed
+finding — real `ncu` metrics would settle it, but weren't obtained on this
+hardware/environment combination. See `reports/nsight_profiling_guide.md`
+for the specific commands and metrics that would close this out if profiling
+access is resolved later (a Windows-host-elevated terminal is the most
+likely next thing to try, per that guide's troubleshooting section).

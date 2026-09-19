@@ -21,14 +21,21 @@ in the CUDA kernels and the benchmarking methodology.
 ## Development Phases
 
 - [x] Phase 1 — Environment Setup
-- [ ] Phase 2 — CPU Implementation (baseline correctness)
-- [ ] Phase 3 — Basic CUDA (grayscale, inversion — thread/block fundamentals)
-- [ ] Phase 4 — CUDA Convolution (naive -> shared memory -> tiled)
-- [ ] Phase 5 — CUDA Optimization (coalescing, constant memory, occupancy)
-- [ ] Phase 6 — Benchmarking (CPU vs GPU, multiple resolutions/configs)
-- [ ] Phase 7 — Visualization (execution-time and speedup graphs)
-- [ ] Phase 8 — Django Application (optional web UI)
-- [ ] Phase 9 — Profiling (Nsight Systems / Nsight Compute)
+- [x] Phase 2 — CPU Implementation (baseline correctness)
+- [x] Phase 3 — Basic CUDA (grayscale, inversion — thread/block fundamentals)
+- [x] Phase 4 — CUDA Convolution (naive -> shared memory -> tiled)
+- [x] Phase 5 — CUDA Optimization (constant memory, tiled matrix multiplication)
+- [x] Phase 6 — Benchmarking (CPU vs GPU across resolutions and matrix sizes)
+- [x] Phase 7 — Visualization (execution-time, speedup, and naive-vs-tiled charts)
+- [x] Phase 8 — Django Application (upload, algorithm/execution selection, CPU-vs-CUDA comparison)
+- [x] Phase 9 — Profiling (Nsight guide written; a real `ncu` run on this hardware
+      was blocked by a WSL2 GPU-performance-counter permission issue — see
+      `reports/nsight_profiling_guide.md`'s troubleshooting section)
+
+See `reports/performance_analysis.md` for the full write-up: correctness
+results, the SRS's own research questions answered with real data, and a
+detailed case study of a real performance bug that was found, diagnosed,
+and fixed in the shared-memory convolution kernel.
 
 ## Requirements
 
@@ -36,11 +43,12 @@ in the CUDA kernels and the benchmarking methodology.
 - CMake >= 3.18, g++ with C++17 support
 - OpenCV (dev headers for C++, `opencv-python` for the Python layer)
 - Python 3.10+
+- Django (optional, only for the Phase 8 web UI)
 
-## Phase 1 — Getting Started
+## Getting Started
 
 ```bash
-# From the project root, on the machine with the NVIDIA GPU (your WSL2 box):
+# From the project root, on the machine with the NVIDIA GPU:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -50,31 +58,42 @@ python3 python/verify_setup.py
 
 `verify_setup.py` checks: `nvidia-smi`, `nvcc`, `g++`, `cmake`, OpenCV
 (C++ and Python), NumPy, Docker, and that the directory structure is intact.
-Both `nvidia-smi` and `nvcc` are treated as critical — the script exits
-non-zero if either is missing, since nothing in Phase 3 onward works without
-them.
 
-Once Phase 1 passes clean, Phase 2 starts: CPU implementations in
-`cpp/cpu/` that establish the correctness baseline every CUDA kernel gets
-checked against.
+Each algorithm has a standalone build-and-run demo documented in its own
+file's header comment (e.g. `cuda/demo_tiled_convolution_cuda.cu`), which is
+the fastest way to verify any one piece works before touching the rest. The
+full benchmark suite (`cpp/benchmark/benchmark.cpp`) and the Django UI
+(`backend/django_app/`) both build on top of those same, individually
+verified pieces.
 
 ## Project Structure
 
 ```
 gpu-computer-vision/
 ├── cuda/
-│   ├── kernels/       naive CUDA kernels (Phase 3-4)
-│   ├── optimized/     shared-memory / tiled versions (Phase 4-5)
-│   └── utils/         CUDA helper headers (timing, error-checking)
+│   ├── kernels/       CUDA kernels: grayscale, inversion, blur, sobel,
+│   │                  naive convolution, histogram, matmul
+│   ├── optimized/     shared-memory tiled convolution and matmul
+│   └── utils/         CUDA helper headers (timing, error-checking, clamping)
 ├── cpp/
-│   ├── cpu/           CPU baseline implementations (Phase 2)
-│   └── benchmark/     CPU vs GPU benchmark harness (Phase 6)
+│   ├── cpu/           CPU baseline implementations
+│   ├── common/        shared Image/Matrix types, convolution/resize helpers
+│   ├── benchmark/      CPU vs GPU benchmark harness + timing utilities
+│   └── cli/            process_image — unified CLI bridging the engine to Django
 ├── python/
-│   ├── preprocessing/ image I/O helpers
-│   ├── benchmarking/  result aggregation, CSV generation
-│   └── visualization/ matplotlib/Chart.js report generation
-├── backend/django_app/  optional web UI (Phase 8)
-├── tests/                unit + correctness tests
+│   └── visualization/ benchmark_results.csv -> charts (matplotlib)
+├── backend/django_app/  optional web UI (upload, algorithm/execution selection)
 ├── data/{input,output}   sample images, processed results
-└── reports/              benchmark_results.csv, analysis
+└── reports/              benchmark_results.csv, charts/, performance_analysis.md,
+                          nsight_profiling_guide.md
 ```
+
+## Resume Note
+
+The centerpiece finding — a real performance regression found, diagnosed with
+custom CUDA-event instrumentation, and fixed in the shared-memory convolution
+kernel (see `reports/performance_analysis.md` §4) — is stronger interview
+material than any single speedup number. Use it. The best raw numbers
+(247x matmul, 60x tiled matmul, 29x Gaussian blur) are specific to the test
+image and RTX 3050 Laptop GPU used here — re-verify on your own hardware
+before quoting them elsewhere.
